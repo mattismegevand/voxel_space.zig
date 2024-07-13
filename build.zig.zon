@@ -1,0 +1,14 @@
+.{
+    .name = "voxel_space.zig",
+    .version = "0.0.0",
+    .dependencies = .{
+        .sokol = .{
+            .url = "git+https://github.com/floooh/sokol-zig.git#d9f3ef983b7021417cc91bd5788cd925ca06aa83",
+            .hash = "12200a472b4f1a3a6db1002f39f10ae0cccf58ada45bf25ddc5fd48384dd187f55ea",
+        },
+        .cimgui = .{
+            .path = "deps/cimgui",
+        },
+    },
+    .paths = .{""},
+}
