@@ -41,6 +41,9 @@ fn buildNative(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, dep_so
     });
     demo.root_module.addImport("sokol", dep_sokol.module("sokol"));
     demo.root_module.addImport("cimgui", dep_cimgui.module("cimgui"));
+    demo.addCSourceFiles(.{ .files = &[_][]const u8{"src/stb_image.c"}, .flags = &[_][]const u8{"-g"} });
+    demo.addIncludePath(.{ .src_path = .{ .owner = b, .sub_path = "src/" } });
+
     b.installArtifact(demo);
     b.step("run", "Run demo").dependOn(&b.addRunArtifact(demo).step);
 }

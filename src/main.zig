@@ -1,3 +1,4 @@
+const std = @import("std");
 const ig = @import("cimgui");
 const sokol = @import("sokol");
 const slog = sokol.log;
@@ -5,6 +6,9 @@ const sg = sokol.gfx;
 const sapp = sokol.app;
 const sglue = sokol.glue;
 const simgui = sokol.imgui;
+const c = @cImport({
+    @cInclude("stb_image.h");
+});
 
 const state = struct {
     var pass_action: sg.PassAction = .{};
@@ -26,6 +30,12 @@ export fn init() void {
         .load_action = .CLEAR,
         .clear_value = .{ .r = 0.0, .g = 0.5, .b = 1.0, .a = 1.0 },
     };
+
+    var x: c_int = undefined;
+    var y: c_int = undefined;
+    var n: c_int = undefined;
+    _ = c.stbi_load("assets/C1W.png", &x, &y, &n, 0);
+    std.debug.print("{} {} {}", .{ x, y, n });
 }
 
 export fn frame() void {
