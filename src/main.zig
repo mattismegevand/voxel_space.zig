@@ -19,6 +19,7 @@ const state = struct {
     var img_height: i32 = undefined;
     var smp: sg.Sampler = .{};
     var rendered: bool = false;
+    var ybuffer: [4096]f32 = undefined;
 };
 
 const Point = struct {
@@ -140,8 +141,13 @@ fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32,
     const sinphi: f32 = std.math.sin(phi);
     const cosphi: f32 = std.math.cos(phi);
 
-    var z: f32 = distance;
-    while (z > 1) : (z -= 1) {
+    for (0..@intCast(screen_width)) |i| {
+        state.ybuffer[i] = @as(f32, @floatFromInt(screen_height));
+    }
+
+    var dz: f32 = 1;
+    var z: f32 = 1;
+    while (z < distance) : (z += 1) {
         var pleft = Point{
             .x = (-cosphi * z - sinphi * z) + p.x,
             .y = (sinphi * z - cosphi * z) + p.y,
@@ -158,15 +164,22 @@ fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32,
         while (i < @as(f32, @floatFromInt(screen_width))) : (i += 1) {
             const height_on_screen = (height - @as(f32, @floatFromInt(getHeight(pleft)))) / z * scale_height + horizon;
             const color = getColor(pleft);
+            const ii: usize = @as(usize, @intFromFloat(i));
             const start = pixelToGL(i, height_on_screen, screen_width, screen_height);
-            const end = pixelToGL(i, @as(f32, @floatFromInt(screen_height)), screen_width, screen_height);
+            const end = pixelToGL(i, state.ybuffer[ii], screen_width, screen_height);
 
             sgl.v2fC3b(start[0], start[1], color.r, color.g, color.b);
             sgl.v2fC3b(end[0], end[1], color.r, color.g, color.b);
 
+            if (height_on_screen < state.ybuffer[ii]) {
+                state.ybuffer[ii] = height_on_screen;
+            }
+
             pleft.x += dx;
             pleft.y += dy;
         }
+        z += dz;
+        dz += 0.01;
     }
     sgl.end();
 }
