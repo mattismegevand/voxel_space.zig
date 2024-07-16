@@ -63,6 +63,7 @@ export fn frame() void {
     const Params = struct {
         var x: f32 = 600;
         var y: f32 = 600;
+        var phi: f32 = 0;
         var height: f32 = 50;
         var horizon: f32 = 120;
         var scale_height: f32 = 120;
@@ -75,16 +76,20 @@ export fn frame() void {
         .dpi_scale = sapp.dpiScale(),
     });
 
+    Params.x += 1;
+    Params.y += 1;
+
     _ = ig.igBegin("params", 0, ig.ImGuiWindowFlags_None);
     _ = ig.igDragFloat("x", &Params.x, 1, 0, 1000, "%f", 0);
     _ = ig.igDragFloat("y", &Params.y, 1, 0, 1000, "%f", 0);
+    _ = ig.igDragFloat("phi", &Params.phi, 0.01, 4, 1, "%f", 0);
     _ = ig.igDragFloat("height", &Params.height, 1, 0, 1000, "%f", 0);
     _ = ig.igDragFloat("horizon", &Params.horizon, 1, 0, 1000, "%f", 0);
     _ = ig.igDragFloat("scale_height", &Params.scale_height, 1, 0, 1000, "%f", 0);
     _ = ig.igDragFloat("distance", &Params.distance, 1, 0, 1000, "%f", 0);
     ig.igEnd();
 
-    drawTerrain(Point{ .x = Params.x, .y = Params.y }, Params.height, Params.horizon, Params.scale_height, Params.distance, sapp.width(), sapp.height());
+    drawTerrain(Point{ .x = Params.x, .y = Params.y }, Params.phi, Params.height, Params.horizon, Params.scale_height, Params.distance, sapp.width(), sapp.height());
 
     sg.beginPass(.{ .action = state.pass_action, .swapchain = sglue.swapchain() });
     sgl.draw();
@@ -128,35 +133,42 @@ fn pixelToGL(x: f32, y: f32, screen_width: i32, screen_height: i32) [2]f32 {
     };
 }
 
-fn drawTerrain(p: Point, height: f32, horizon: f32, scale_height: f32, distance: f32, screen_width: i32, screen_height: i32) void {
+fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32, distance: f32, screen_width: i32, screen_height: i32) void {
     sgl.defaults();
+    sgl.beginLines();
+
+    const sinphi: f32 = std.math.sin(phi);
+    const cosphi: f32 = std.math.cos(phi);
 
     var z: f32 = distance;
     while (z > 1) : (z -= 1) {
         var pleft = Point{
-            .x = -z + p.x,
-            .y = -z + p.y,
+            .x = (-cosphi * z - sinphi * z) + p.x,
+            .y = (sinphi * z - cosphi * z) + p.y,
         };
         const pright = Point{
-            .x = z + p.x,
-            .y = -z + p.y,
+            .x = (cosphi * z - sinphi * z) + p.x,
+            .y = (-sinphi * z - cosphi * z) + p.y,
         };
+
         const dx: f32 = (pright.x - pleft.x) / @as(f32, @floatFromInt(screen_width));
+        const dy: f32 = (pright.y - pleft.y) / @as(f32, @floatFromInt(screen_width));
+
         var i: f32 = 0;
         while (i < @as(f32, @floatFromInt(screen_width))) : (i += 1) {
-            const height_on_screen = std.math.clamp((height - @as(f32, @floatFromInt(getHeight(pleft)))) / z * scale_height + horizon, 0, @as(f32, @floatFromInt(screen_height)));
+            const height_on_screen = (height - @as(f32, @floatFromInt(getHeight(pleft)))) / z * scale_height + horizon;
             const color = getColor(pleft);
             const start = pixelToGL(i, height_on_screen, screen_width, screen_height);
             const end = pixelToGL(i, @as(f32, @floatFromInt(screen_height)), screen_width, screen_height);
 
-            sgl.beginLines();
             sgl.v2fC3b(start[0], start[1], color.r, color.g, color.b);
             sgl.v2fC3b(end[0], end[1], color.r, color.g, color.b);
-            sgl.end();
 
             pleft.x += dx;
+            pleft.y += dy;
         }
     }
+    sgl.end();
 }
 
 pub fn main() void {
