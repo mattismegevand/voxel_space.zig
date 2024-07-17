@@ -12,14 +12,12 @@ const c = @cImport({
 });
 
 const state = struct {
-    var pass_action: sg.PassAction = .{};
     var color_map: [*c]u8 = undefined;
     var height_map: [*c]u8 = undefined;
     var img_width: i32 = undefined;
     var img_height: i32 = undefined;
-    var smp: sg.Sampler = .{};
-    var rendered: bool = false;
     var ybuffer: [4096]f32 = undefined;
+    var pass_action: sg.PassAction = .{};
 };
 
 const Point = struct {
@@ -61,6 +59,13 @@ export fn init() void {
 }
 
 export fn frame() void {
+    simgui.newFrame(.{
+        .width = sapp.width(),
+        .height = sapp.height(),
+        .delta_time = sapp.frameDuration(),
+        .dpi_scale = sapp.dpiScale(),
+    });
+
     const Params = struct {
         var x: f32 = 600;
         var y: f32 = 600;
@@ -70,12 +75,6 @@ export fn frame() void {
         var scale_height: f32 = 120;
         var distance: f32 = 300;
     };
-    simgui.newFrame(.{
-        .width = sapp.width(),
-        .height = sapp.height(),
-        .delta_time = sapp.frameDuration(),
-        .dpi_scale = sapp.dpiScale(),
-    });
 
     Params.x += 1;
     Params.y += 1;
@@ -90,7 +89,7 @@ export fn frame() void {
     _ = ig.igDragFloat("distance", &Params.distance, 1, 0, 1000, "%f", 0);
     ig.igEnd();
 
-    drawTerrain(Point{ .x = Params.x, .y = Params.y }, Params.phi, Params.height, Params.horizon, Params.scale_height, Params.distance, sapp.width(), sapp.height());
+    drawTerrain(Point{ .x = Params.x, .y = Params.y }, Params.phi, Params.height, Params.horizon, Params.scale_height, Params.distance);
 
     sg.beginPass(.{ .action = state.pass_action, .swapchain = sglue.swapchain() });
     sgl.draw();
@@ -127,22 +126,22 @@ fn getColor(p: Point) Color {
     };
 }
 
-fn pixelToGL(x: f32, y: f32, screen_width: i32, screen_height: i32) [2]f32 {
+fn pixelToGL(x: f32, y: f32) [2]f32 {
     return .{
-        x / @as(f32, @floatFromInt(screen_width)) * 2.0 - 1.0,
-        1.0 - (y / @as(f32, @floatFromInt(screen_height)) * 2.0),
+        x / @as(f32, @floatFromInt(sapp.width())) * 2.0 - 1.0,
+        1.0 - (y / @as(f32, @floatFromInt(sapp.height())) * 2.0),
     };
 }
 
-fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32, distance: f32, screen_width: i32, screen_height: i32) void {
+fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32, distance: f32) void {
     sgl.defaults();
     sgl.beginLines();
 
     const sinphi: f32 = std.math.sin(phi);
     const cosphi: f32 = std.math.cos(phi);
 
-    for (0..@intCast(screen_width)) |i| {
-        state.ybuffer[i] = @as(f32, @floatFromInt(screen_height));
+    for (0..@intCast(sapp.width())) |i| {
+        state.ybuffer[i] = @as(f32, @floatFromInt(sapp.height()));
     }
 
     var dz: f32 = 1;
@@ -157,22 +156,21 @@ fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32,
             .y = (-sinphi * z - cosphi * z) + p.y,
         };
 
-        const dx: f32 = (pright.x - pleft.x) / @as(f32, @floatFromInt(screen_width));
-        const dy: f32 = (pright.y - pleft.y) / @as(f32, @floatFromInt(screen_width));
+        const dx: f32 = (pright.x - pleft.x) / @as(f32, @floatFromInt(sapp.width()));
+        const dy: f32 = (pright.y - pleft.y) / @as(f32, @floatFromInt(sapp.width()));
 
-        var i: f32 = 0;
-        while (i < @as(f32, @floatFromInt(screen_width))) : (i += 1) {
+        var i: i32 = 0;
+        while (i < sapp.width()) : (i += 1) {
             const height_on_screen = (height - @as(f32, @floatFromInt(getHeight(pleft)))) / z * scale_height + horizon;
             const color = getColor(pleft);
-            const ii: usize = @as(usize, @intFromFloat(i));
-            const start = pixelToGL(i, height_on_screen, screen_width, screen_height);
-            const end = pixelToGL(i, state.ybuffer[ii], screen_width, screen_height);
+            const start = pixelToGL(@as(f32, @floatFromInt(i)), height_on_screen);
+            const end = pixelToGL(@as(f32, @floatFromInt(i)), state.ybuffer[@intCast(i)]);
 
             sgl.v2fC3b(start[0], start[1], color.r, color.g, color.b);
             sgl.v2fC3b(end[0], end[1], color.r, color.g, color.b);
 
-            if (height_on_screen < state.ybuffer[ii]) {
-                state.ybuffer[ii] = height_on_screen;
+            if (height_on_screen < state.ybuffer[@intCast(i)]) {
+                state.ybuffer[@intCast(i)] = height_on_screen;
             }
 
             pleft.x += dx;
