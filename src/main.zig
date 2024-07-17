@@ -11,12 +11,23 @@ const c = @cImport({
     @cInclude("stb_image.h");
 });
 
+const MOVE_SPEED: f32 = 2.5;
+const ROT_SPEED: f32 = 0.1;
+const UP_DOWN_SPEED: f32 = 5.0;
+
 const state = struct {
+    var allocator: std.mem.Allocator = undefined;
+    var map_index: usize = 0;
+    var maps: [2][*c]const u8 = [_][*c]const u8{
+        "1",
+        "2",
+    };
     var color_map: [*c]u8 = undefined;
     var height_map: [*c]u8 = undefined;
     var img_width: i32 = undefined;
     var img_height: i32 = undefined;
     var ybuffer: [4096]f32 = undefined;
+    var animation: bool = true;
     var pass_action: sg.PassAction = .{};
 };
 
@@ -31,6 +42,29 @@ const Color = struct {
     b: u8,
 };
 
+fn loadMap() void {
+    // TODO: check if there is a better way to do this and handle error / potential missing file
+    const color_filename = std.fmt.allocPrint(state.allocator, "assets/C{d}W.png", .{state.map_index + 1}) catch {
+        return;
+    };
+    const height_filename = std.fmt.allocPrint(state.allocator, "assets/D{d}.png", .{state.map_index + 1}) catch {
+        return;
+    };
+    defer state.allocator.free(color_filename);
+    defer state.allocator.free(height_filename);
+
+    var w: c_int = undefined;
+    var h: c_int = undefined;
+    var n: c_int = undefined;
+    std.debug.print("Loading {s} {s}\n", .{ color_filename, height_filename });
+
+    state.color_map = c.stbi_load(color_filename.ptr, &w, &h, &n, 0);
+    state.height_map = c.stbi_load(height_filename.ptr, &w, &h, &n, 0);
+    state.img_width = w;
+    state.img_height = h;
+    std.debug.print("size {d} {d}\n", .{ w, h });
+}
+
 export fn init() void {
     sg.setup(.{
         .environment = sglue.environment(),
@@ -44,13 +78,9 @@ export fn init() void {
         .logger = .{ .func = slog.func },
     });
 
-    var w: c_int = undefined;
-    var h: c_int = undefined;
-    var n: c_int = undefined;
-    state.color_map = c.stbi_load("assets/C1W.png", &w, &h, &n, 0);
-    state.height_map = c.stbi_load("assets/D1.png", &w, &h, &n, 0);
-    state.img_width = w;
-    state.img_height = h;
+    state.allocator = std.heap.page_allocator;
+    // TODO: init maps
+    loadMap();
 
     state.pass_action.colors[0] = .{
         .load_action = .CLEAR,
@@ -76,10 +106,61 @@ export fn frame() void {
         var distance: f32 = 300;
     };
 
-    Params.x += 1;
-    Params.y += 1;
+    if (ig.igIsKeyPressed_Bool(ig.ImGuiKey_P, false)) {
+        state.animation = !state.animation;
+    }
+
+    if (state.animation) {
+        Params.x += 1;
+        Params.y += 1;
+    } else {
+        if (ig.igIsKeyPressed_Bool(ig.ImGuiKey_W, true)) {
+            Params.x -= MOVE_SPEED * std.math.sin(Params.phi);
+            Params.y -= MOVE_SPEED * std.math.cos(Params.phi);
+        }
+        if (ig.igIsKeyPressed_Bool(ig.ImGuiKey_S, true)) {
+            Params.x += MOVE_SPEED * std.math.sin(Params.phi);
+            Params.y += MOVE_SPEED * std.math.cos(Params.phi);
+        }
+        if (ig.igIsKeyPressed_Bool(ig.ImGuiKey_A, true)) {
+            Params.x -= MOVE_SPEED * std.math.cos(Params.phi);
+            Params.y += MOVE_SPEED * std.math.sin(Params.phi);
+        }
+        if (ig.igIsKeyPressed_Bool(ig.ImGuiKey_D, true)) {
+            Params.x += MOVE_SPEED * std.math.cos(Params.phi);
+            Params.y -= MOVE_SPEED * std.math.sin(Params.phi);
+        }
+        if (ig.igIsKeyPressed_Bool(ig.ImGuiKey_Q, true)) {
+            Params.phi += ROT_SPEED;
+        }
+        if (ig.igIsKeyPressed_Bool(ig.ImGuiKey_E, true)) {
+            Params.phi -= ROT_SPEED;
+        }
+        if (ig.igIsKeyPressed_Bool(ig.ImGuiKey_Space, true)) {
+            Params.height += UP_DOWN_SPEED;
+        }
+        if (ig.igIsKeyPressed_Bool(ig.ImGuiKey_LeftCtrl, true)) {
+            Params.height -= UP_DOWN_SPEED;
+        }
+    }
 
     _ = ig.igBegin("params", 0, ig.ImGuiWindowFlags_None);
+    if (ig.igBeginCombo("map", state.maps[state.map_index], 0)) {
+        for (0.., state.maps) |i, elem| {
+            const is_selected = (state.map_index == i);
+            if (ig.igSelectable_Bool(elem, is_selected, 0, ig.ImVec2{})) {
+                if (state.map_index != i) {
+                    state.map_index = i;
+                    loadMap();
+                }
+            }
+
+            if (is_selected) {
+                ig.igSetItemDefaultFocus();
+            }
+        }
+        ig.igEndCombo();
+    }
     _ = ig.igDragFloat("x", &Params.x, 1, 0, 1000, "%f", 0);
     _ = ig.igDragFloat("y", &Params.y, 1, 0, 1000, "%f", 0);
     _ = ig.igDragFloat("phi", &Params.phi, 0.01, 4, 1, "%f", 0);
