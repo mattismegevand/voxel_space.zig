@@ -18,10 +18,7 @@ const UP_DOWN_SPEED: f32 = 5.0;
 const state = struct {
     var allocator: std.mem.Allocator = undefined;
     var map_index: usize = 0;
-    var maps: [2][*c]const u8 = [_][*c]const u8{
-        "1",
-        "2",
-    };
+    var maps: [][]const u8 = undefined;
     var color_map: [*c]u8 = undefined;
     var height_map: [*c]u8 = undefined;
     var img_width: i32 = undefined;
@@ -43,8 +40,16 @@ const Color = struct {
 };
 
 fn loadMap() void {
-    // TODO: check if there is a better way to do this and handle error / potential missing file
-    const color_filename = std.fmt.allocPrint(state.allocator, "assets/C{d}W.png", .{state.map_index + 1}) catch {
+    if (state.color_map) |ptr| {
+        c.stbi_image_free(ptr);
+        state.color_map = null;
+    }
+    if (state.height_map) |ptr| {
+        c.stbi_image_free(ptr);
+        state.height_map = null;
+    }
+
+    const color_filename = std.fmt.allocPrint(state.allocator, "assets/C{d}.png", .{state.map_index + 1}) catch {
         return;
     };
     const height_filename = std.fmt.allocPrint(state.allocator, "assets/D{d}.png", .{state.map_index + 1}) catch {
@@ -56,13 +61,11 @@ fn loadMap() void {
     var w: c_int = undefined;
     var h: c_int = undefined;
     var n: c_int = undefined;
-    std.debug.print("Loading {s} {s}\n", .{ color_filename, height_filename });
 
     state.color_map = c.stbi_load(color_filename.ptr, &w, &h, &n, 0);
     state.height_map = c.stbi_load(height_filename.ptr, &w, &h, &n, 0);
     state.img_width = w;
     state.img_height = h;
-    std.debug.print("size {d} {d}\n", .{ w, h });
 }
 
 export fn init() void {
@@ -79,7 +82,15 @@ export fn init() void {
     });
 
     state.allocator = std.heap.page_allocator;
-    // TODO: init maps
+    state.maps = state.allocator.alloc([]const u8, 25) catch {
+        return;
+    };
+    for (0.., state.maps) |i, *map| {
+        map.* = std.fmt.allocPrint(state.allocator, "{d}", .{i + 1}) catch {
+            return;
+        };
+    }
+
     loadMap();
 
     state.pass_action.colors[0] = .{
@@ -97,8 +108,8 @@ export fn frame() void {
     });
 
     const Params = struct {
-        var x: f32 = 600;
-        var y: f32 = 600;
+        var x: f32 = 200;
+        var y: f32 = 200;
         var phi: f32 = 0;
         var height: f32 = 50;
         var horizon: f32 = 120;
@@ -145,10 +156,10 @@ export fn frame() void {
     }
 
     _ = ig.igBegin("params", 0, ig.ImGuiWindowFlags_None);
-    if (ig.igBeginCombo("map", state.maps[state.map_index], 0)) {
+    if (ig.igBeginCombo("map", @ptrCast(state.maps[state.map_index]), 0)) {
         for (0.., state.maps) |i, elem| {
             const is_selected = (state.map_index == i);
-            if (ig.igSelectable_Bool(elem, is_selected, 0, ig.ImVec2{})) {
+            if (ig.igSelectable_Bool(@ptrCast(elem), is_selected, 0, ig.ImVec2{})) {
                 if (state.map_index != i) {
                     state.map_index = i;
                     loadMap();
@@ -180,6 +191,19 @@ export fn frame() void {
 }
 
 export fn cleanup() void {
+    for (state.maps) |map| {
+        state.allocator.free(map);
+    }
+    state.allocator.free(state.maps);
+
+    if (state.color_map) |ptr| {
+        c.stbi_image_free(ptr);
+    }
+
+    if (state.height_map) |ptr| {
+        c.stbi_image_free(ptr);
+    }
+
     simgui.shutdown();
     sgl.shutdown();
     sg.shutdown();
@@ -189,17 +213,19 @@ export fn event(ev: [*c]const sapp.Event) void {
     _ = simgui.handleEvent(ev.*);
 }
 
+fn getIndex(p: Point, channels: i32) usize {
+    const x = @mod(@as(i32, @intFromFloat(p.x)), state.img_width - 1);
+    const y = @mod(@as(i32, @intFromFloat(p.y)), state.img_height - 1);
+    const index = @as(usize, @intCast(channels * (y * state.img_width + x)));
+    return index;
+}
+
 fn getHeight(p: Point) u8 {
-    const x = @mod(@as(i32, @intFromFloat(p.x)), state.img_width);
-    const y = @mod(@as(i32, @intFromFloat(p.y)), state.img_height);
-    const index = @as(usize, @intCast(y * state.img_width + x));
-    return state.height_map[index];
+    return state.height_map[getIndex(p, 1)];
 }
 
 fn getColor(p: Point) Color {
-    const x = @mod(@as(i32, @intFromFloat(p.x)), state.img_width);
-    const y = @mod(@as(i32, @intFromFloat(p.y)), state.img_height);
-    const index = @as(usize, @intCast(3 * (y * state.img_width + x)));
+    const index = getIndex(p, 3);
     return Color{
         .r = state.color_map[index],
         .g = state.color_map[index + 1],
@@ -258,7 +284,7 @@ fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32,
             pleft.y += dy;
         }
         z += dz;
-        dz += 0.01;
+        dz += 0.00;
     }
     sgl.end();
 }
