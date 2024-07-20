@@ -28,16 +28,9 @@ const state = struct {
     var pass_action: sg.PassAction = .{};
 };
 
-const Point = struct {
-    x: f32,
-    y: f32,
-};
+const Point = struct { x: f32, y: f32 };
 
-const Color = struct {
-    r: u8,
-    g: u8,
-    b: u8,
-};
+const Color = struct { r: u8, g: u8, b: u8 };
 
 fn loadMap() void {
     if (state.color_map) |ptr| {
@@ -50,9 +43,12 @@ fn loadMap() void {
     }
 
     const color_filename = std.fmt.allocPrint(state.allocator, "assets/C{d}.png", .{state.map_index + 1}) catch {
+        cleanup();
         return;
     };
+
     const height_filename = std.fmt.allocPrint(state.allocator, "assets/D{d}.png", .{state.map_index + 1}) catch {
+        cleanup();
         return;
     };
     defer state.allocator.free(color_filename);
@@ -64,6 +60,10 @@ fn loadMap() void {
 
     state.color_map = c.stbi_load(color_filename.ptr, &w, &h, &n, 0);
     state.height_map = c.stbi_load(height_filename.ptr, &w, &h, &n, 0);
+    if (state.color_map == null or state.height_map == null) {
+        cleanup();
+        return;
+    }
     state.img_width = w;
     state.img_height = h;
 }
@@ -83,10 +83,12 @@ export fn init() void {
 
     state.allocator = std.heap.page_allocator;
     state.maps = state.allocator.alloc([]const u8, 25) catch {
+        cleanup();
         return;
     };
     for (0.., state.maps) |i, *map| {
         map.* = std.fmt.allocPrint(state.allocator, "{d}", .{i + 1}) catch {
+            cleanup();
             return;
         };
     }
@@ -153,6 +155,10 @@ export fn frame() void {
         if (ig.igIsKeyPressed_Bool(ig.ImGuiKey_LeftCtrl, true)) {
             Params.height -= UP_DOWN_SPEED;
         }
+    }
+    if (ig.igIsKeyPressed_Bool(ig.ImGuiKey_Escape, true)) {
+        cleanup();
+        return;
     }
 
     _ = ig.igBegin("params", 0, ig.ImGuiWindowFlags_None);
@@ -235,8 +241,8 @@ fn getColor(p: Point) Color {
 
 fn pixelToGL(x: f32, y: f32) [2]f32 {
     return .{
-        x / @as(f32, @floatFromInt(sapp.width())) * 2.0 - 1.0,
-        1.0 - (y / @as(f32, @floatFromInt(sapp.height())) * 2.0),
+        x / sapp.widthf() * 2.0 - 1.0,
+        1.0 - (y / sapp.heightf() * 2.0),
     };
 }
 
@@ -248,7 +254,7 @@ fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32,
     const cosphi: f32 = std.math.cos(phi);
 
     for (0..@intCast(sapp.width())) |i| {
-        state.ybuffer[i] = @as(f32, @floatFromInt(sapp.height()));
+        state.ybuffer[i] = std.math.inf(f32);
     }
 
     var dz: f32 = 1;
@@ -263,8 +269,8 @@ fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32,
             .y = (-sinphi * z - cosphi * z) + p.y,
         };
 
-        const dx: f32 = (pright.x - pleft.x) / @as(f32, @floatFromInt(sapp.width()));
-        const dy: f32 = (pright.y - pleft.y) / @as(f32, @floatFromInt(sapp.width()));
+        const dx: f32 = (pright.x - pleft.x) / sapp.widthf();
+        const dy: f32 = (pright.y - pleft.y) / sapp.widthf();
 
         var i: i32 = 0;
         while (i < sapp.width()) : (i += 1) {
@@ -276,15 +282,13 @@ fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32,
             sgl.v2fC3b(start[0], start[1], color.r, color.g, color.b);
             sgl.v2fC3b(end[0], end[1], color.r, color.g, color.b);
 
-            if (height_on_screen < state.ybuffer[@intCast(i)]) {
-                state.ybuffer[@intCast(i)] = height_on_screen;
-            }
+            state.ybuffer[@intCast(i)] = @min(height_on_screen, state.ybuffer[@intCast(i)]);
 
             pleft.x += dx;
             pleft.y += dy;
         }
         z += dz;
-        dz += 0.00;
+        dz += 0.01;
     }
     sgl.end();
 }
