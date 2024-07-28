@@ -11,6 +11,7 @@ const c = @cImport({
     @cInclude("stb_image.h");
 });
 
+const AVG_TICK_SAMPLES = 60;
 const MOVE_SPEED: f32 = 2.5;
 const ROT_SPEED: f32 = 0.1;
 const UP_DOWN_SPEED: f32 = 5.0;
@@ -19,8 +20,13 @@ const state = struct {
     var allocator: std.mem.Allocator = undefined;
     var map_index: usize = 0;
     var maps: [][]const u8 = undefined;
+    var tick_times: [AVG_TICK_SAMPLES]u64 = undefined;
+    var tick_index: usize = 0;
+    var tick_sum: u64 = 0;
     var color_map: [*c]u8 = undefined;
     var height_map: [*c]u8 = undefined;
+    var win_width: f32 = undefined;
+    var win_height: f32 = undefined;
     var img_width: i32 = undefined;
     var img_height: i32 = undefined;
     var ybuffer: [4096]f32 = undefined;
@@ -101,6 +107,16 @@ export fn init() void {
     };
 }
 
+fn calcAvgTick(new_tick: u64) u64 {
+    state.tick_sum -= state.tick_times[state.tick_index];
+    state.tick_sum += new_tick;
+    state.tick_times[state.tick_index] = new_tick;
+    if (state.tick_index >= AVG_TICK_SAMPLES) {
+        state.tick_index = 0;
+    }
+    return state.tick_sum / AVG_TICK_SAMPLES;
+}
+
 export fn frame() void {
     simgui.newFrame(.{
         .width = sapp.width(),
@@ -108,6 +124,13 @@ export fn frame() void {
         .delta_time = sapp.frameDuration(),
         .dpi_scale = sapp.dpiScale(),
     });
+    state.win_width = sapp.widthf();
+    state.win_height = sapp.heightf();
+
+    const start = std.time.Instant.now() catch {
+        cleanup();
+        return;
+    };
 
     const Params = struct {
         var x: f32 = 200;
@@ -184,10 +207,21 @@ export fn frame() void {
     _ = ig.igDragFloat("height", &Params.height, 1, 0, 1000, "%f", 0);
     _ = ig.igDragFloat("horizon", &Params.horizon, 1, 0, 1000, "%f", 0);
     _ = ig.igDragFloat("scale_height", &Params.scale_height, 1, 0, 1000, "%f", 0);
-    _ = ig.igDragFloat("distance", &Params.distance, 1, 0, 1000, "%f", 0);
+    _ = ig.igDragFloat("distance", &Params.distance, 1, 0, 5000, "%f", 0);
     ig.igEnd();
 
     drawTerrain(Point{ .x = Params.x, .y = Params.y }, Params.phi, Params.height, Params.horizon, Params.scale_height, Params.distance);
+
+    const end = std.time.Instant.now() catch {
+        cleanup();
+        return;
+    };
+    const avg_tick = calcAvgTick(end.since(start));
+    const fps: f32 = 1e9 / @as(f32, @floatFromInt(avg_tick));
+
+    _ = ig.igBegin("## fps", 0, ig.ImGuiWindowFlags_None);
+    ig.igText("FPS: %.0f", fps);
+    ig.igEnd();
 
     sg.beginPass(.{ .action = state.pass_action, .swapchain = sglue.swapchain() });
     sgl.draw();
@@ -241,8 +275,8 @@ fn getColor(p: Point) Color {
 
 fn pixelToGL(x: f32, y: f32) [2]f32 {
     return .{
-        x / sapp.widthf() * 2.0 - 1.0,
-        1.0 - (y / sapp.heightf() * 2.0),
+        x / state.win_width * 2.0 - 1.0,
+        1.0 - (y / state.win_height * 2.0),
     };
 }
 
@@ -253,7 +287,8 @@ fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32,
     const sinphi: f32 = std.math.sin(phi);
     const cosphi: f32 = std.math.cos(phi);
 
-    for (0..@intCast(sapp.width())) |i| {
+    const win_widthi = @as(i32, @intFromFloat(state.win_width));
+    for (0..@intCast(win_widthi)) |i| {
         state.ybuffer[i] = std.math.inf(f32);
     }
 
@@ -269,11 +304,11 @@ fn drawTerrain(p: Point, phi: f32, height: f32, horizon: f32, scale_height: f32,
             .y = (-sinphi * z - cosphi * z) + p.y,
         };
 
-        const dx: f32 = (pright.x - pleft.x) / sapp.widthf();
-        const dy: f32 = (pright.y - pleft.y) / sapp.widthf();
+        const dx: f32 = (pright.x - pleft.x) / state.win_width;
+        const dy: f32 = (pright.y - pleft.y) / state.win_width;
 
         var i: i32 = 0;
-        while (i < sapp.width()) : (i += 1) {
+        while (i < win_widthi) : (i += 1) {
             const height_on_screen = (height - @as(f32, @floatFromInt(getHeight(pleft)))) / z * scale_height + horizon;
             const color = getColor(pleft);
             const start = pixelToGL(@as(f32, @floatFromInt(i)), height_on_screen);
